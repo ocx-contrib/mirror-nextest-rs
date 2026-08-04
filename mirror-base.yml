@@ -1,0 +1,54 @@
+# Shared base for every spec in this repository (nextest-rs tooling).
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets, asset_type,
+# metadata, catalog, tests, versions, announce, annotations — stays in that
+# package's own mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge.
+#
+# ⚠️ `platforms:` IS DELIBERATELY ABSENT FROM THIS FILE. The platform matrix is
+# downstream of a per-package libc measurement (readelf on every artifact), so
+# it belongs in the package's own spec, stated in full — the shape
+# `mirror-kitware` uses. Putting it here would invite a future sibling to
+# restate it for one runner tweak and silently drop every `containers:` entry
+# with it, which reds nothing and turns every `os.features` claim back into an
+# assertion.
+
+skip_prereleases: true
+cascade: true
+
+# Fleet rule for a new package: a cascade tag re-points on every re-publish, and
+# without a build segment the new manifest reuses the bare version tag and
+# orphans the prior digest for registry GC — breaking any `@sha256:` pin in a
+# consumer's `ocx.lock`. The documented exception (a version that already
+# carries semver build metadata, where `date` empties the mirror) does not
+# apply: upstream tags plain `cargo-nextest-0.9.140`, no `+build` segment.
+build_timestamp: date
+
+verify:
+  github_asset_digest: true
+
+concurrency:
+  # Assets are single static Rust binaries, 7–16 MB compressed each.
+  max_downloads: 8
+  max_bundles: 4
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# `off`, and it cannot be otherwise here. Every upstream asset in this repo is a
+# FLAT tar.gz holding exactly one member — the bare executable, with no wrapper
+# directory and no `bin/`. `strip_components: 0` therefore lands the executable
+# AT the content root, which makes PATH a bare `${installPath}`. `bin_scan` only
+# looks BELOW an `${installPath}/<dir>` entry, so `auto`/`verify` is rejected at
+# spec load with exit 65. `off` plus a hand-listed `binaries` in metadata.json is
+# the blessed shape for this layout.
+bin_scan: off
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures

@@ -1,0 +1,266 @@
+extends: ../mirror-base.yml
+
+name: cargo-nextest
+
+# Logical index package `nextest-rs/cargo-nextest` at the physical path
+# `ghcr.io/ocx-contrib/nextest-rs/cargo-nextest` — slash segments, never
+# hyphen-flattened. The first segment must be this repo's own GitHub owner:
+# GITHUB_TOKEN only authorises packages owned by the repo the workflow runs in.
+#
+# The package segment is the name the project PUBLISHES under (the crate
+# `cargo-nextest`), not the repo name (`nextest`) and not a binary alias. The
+# namespace is the upstream org, already lowercase.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/nextest-rs/cargo-nextest
+
+source:
+  type: github_release
+  owner: nextest-rs
+  repo: nextest
+
+  # ⚠️ MONOREPO. `nextest-rs/nextest` tags SIX independent crates from one repo
+  # (cargo-nextest, nextest-runner, nextest-metadata, nextest-filtering,
+  # internal-test, quick-junit), so the anchor is load-bearing rather than
+  # cosmetic — a loose `\d+\.\d+\.\d+` would sweep in `nextest-runner-0.90.0`
+  # and friends, which have their own, unrelated version line.
+  #
+  # The strict `X.Y.Z`-only shape ALSO excludes every prerelease scheme upstream
+  # uses (`cargo-nextest-0.9.140-b.2`, `cargo-nextest-0.9.132-rc.3`) without
+  # relying on `skip_prereleases` alone. Verified by matching the regex against
+  # the live tag list:
+  #   cargo-nextest-0.9.140      → accept (version = 0.9.140)
+  #   cargo-nextest-0.9.140-b.2  → reject
+  #   cargo-nextest-0.9.132-rc.3 → reject
+  #   nextest-runner-0.90.0      → reject
+  #   nextest-metadata-0.12.2    → reject
+  #
+  # ℹ️ The in-range sequence legitimately jumps 0.9.138 → 0.9.140. The tag
+  # `cargo-nextest-0.9.139` exists in the repository but carries NO GitHub
+  # Release object (404 on `releases/tags/cargo-nextest-0.9.139`), so there is
+  # nothing to mirror for it. That is upstream's history, not a filter bug.
+  tag_pattern: "^cargo-nextest-(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# Upstream ships BOTH a `-gnu` and a `-musl` build for each Linux arch, so the
+# key is a real decision rather than a formality. What decides it is linkage,
+# never the filename. Measured on the newest (0.9.140) and the oldest in range
+# (0.9.137), on both arches, after `tar xzf`:
+#
+#   $ file cargo-nextest-0.9.140-x86_64-unknown-linux-musl/cargo-nextest
+#   ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked,
+#   with debug_info, not stripped
+#   $ readelf -l …/cargo-nextest | grep -c INTERP  → 0
+#   $ readelf -d …/cargo-nextest | grep -c NEEDED  → 0
+#
+#   $ file cargo-nextest-0.9.140-aarch64-unknown-linux-musl/cargo-nextest
+#   ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked,
+#   with debug_info, not stripped
+#   $ readelf -l …/cargo-nextest | grep -c INTERP  → 0
+#   $ readelf -d …/cargo-nextest | grep -c NEEDED  → 0
+#
+#   (0.9.137 measures identically on both arches: INTERP 0, NEEDED 0.)
+#
+# The `-gnu` builds are the opposite and were measured too, so the contrast is
+# observed rather than assumed:
+#
+#   $ file cargo-nextest-0.9.140-x86_64-unknown-linux-gnu/cargo-nextest
+#   … dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2 …
+#       INTERP 1, NEEDED 4
+#   $ file cargo-nextest-0.9.140-aarch64-unknown-linux-gnu/cargo-nextest
+#   … dynamically linked, interpreter /lib/ld-linux-aarch64.so.1 …
+#       INTERP 1, NEEDED 5
+#
+# NOT UPX-packed — the packer stub defeats this gate by leaving no PT_INTERP and
+# no section headers, so `file` would call every asset "statically linked":
+#   $ strings -a …/cargo-nextest | grep -c '^UPX'   → 0
+#   $ readelf -h …/cargo-nextest | grep 'Start of section headers'
+#     Start of section headers: 25330936 (bytes into file)   # non-zero ⇒ not UPX
+#
+# DECISION: ship the **musl** asset under a **BARE** key on both arches, and do
+# NOT add a second `+libc.glibc` key for the gnu build.
+#
+#   • `os.features` states what the artifact REQUIRES of the host. The musl
+#     build has no PT_INTERP and no DT_NEEDED — it requires nothing — so the key
+#     is bare. Tagging a static build `+libc.musl` would be a false requirement
+#     that hid it from every glibc host, on which it runs fine.
+#   • The skill's own posture is "two keys is the fallback, not the goal": the
+#     gnu build earns a second key only where it carries capability the static
+#     one lacks. The usual such capability is glibc's NSS/DNS resolver — and
+#     cargo-nextest is a local test runner, not a network client. Its work is
+#     spawning test processes and reading/writing files; the resolver never
+#     enters the picture. A second key here would be pure noise for the
+#     consumer and a second artifact to publish.
+#
+# The `alpine:3.20` container leg below is what turns the bare (universal) claim
+# into evidence rather than assertion.
+#
+# ─── Scope (verified BOTH ways on 0.9.137, 0.9.138 and 0.9.140 — the whole
+#     in-range set) ───────────────────────────────────────────────────────────
+#
+# Every pattern below was matched against the FULL asset list of every in-range
+# release and hit EXACTLY ONE asset on all three. A pattern matching zero is
+# SILENTLY SKIPPED, not an error, so this check is the only thing between a typo
+# and a green run with a missing platform.
+#
+# Each release ships 36 assets: 11 target triples × (`.tar.gz` + `.b2` +
+# `.sha256`), plus a `.zip` twin for the three Windows triples. The `$` anchor
+# after `\.gz` excludes every sidecar and every `.zip`. `.tar.gz` is the format
+# chosen because it is the ONLY one present for all six declared platforms
+# across the whole range — the `.zip` exists on Windows only.
+#
+# ⚠️ darwin is ONE asset for TWO platforms. Upstream ships no per-arch macOS
+# build; `-universal-apple-darwin.tar.gz` is a Mach-O UNIVERSAL binary:
+#   $ file …-universal-apple-darwin/cargo-nextest
+#   Mach-O universal binary with 2 architectures:
+#     [x86_64: Mach-O 64-bit x86_64 executable …] [arm64]
+# Two platform keys resolving to the same asset is fine — the rule is that each
+# platform matches exactly one asset, not that each asset serves one platform.
+#
+# ⚠️ windows/arm64 IS SHIPPED (`aarch64-pc-windows-msvc`), on every in-range
+# release — this upstream is the exception to the fleet's usual omission, so it
+# is declared rather than excluded.
+#
+# NOT DECLARED, and no exclusion is owed for them: upstream also ships
+# `riscv64gc-unknown-linux-gnu`, `i686-pc-windows-msvc`, `x86_64-unknown-freebsd`
+# and `x86_64-unknown-illumos`. ocx's `Architecture` enum is amd64|arm64 and its
+# OS enum is linux|darwin|windows, so none of those four is expressible as a
+# platform key at all. Every platform ocx CAN express is declared.
+assets:
+  linux/amd64:
+    - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-x86_64-unknown-linux-musl\\.tar\\.gz$"
+  linux/arm64:
+    - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-aarch64-unknown-linux-musl\\.tar\\.gz$"
+  # ── PASS 2 (darwin) — uncomment together with the platforms: keys below ────
+  # darwin/amd64:
+  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
+  # darwin/arm64:
+  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
+  # ── PASS 3 (windows) — .tar.gz, not the .zip twin ──────────────────────────
+  # windows/amd64:
+  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-x86_64-pc-windows-msvc\\.tar\\.gz$"
+  # windows/arm64:
+  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-aarch64-pc-windows-msvc\\.tar\\.gz$"
+
+asset_type:
+  # FLAT archive on EVERY platform — `tar tzvf` lists exactly ONE member and
+  # nothing else. No wrapper directory, no `bin/`, no bundled LICENSE/README.
+  # Verified on all seven declared-platform assets of 0.9.140 and 0.9.137:
+  #
+  #   -rwxr-xr-x runner/runner  25333368  cargo-nextest        (linux, musl)
+  #   -rwxr-xr-x runner/staff   39964816  cargo-nextest        (darwin universal)
+  #   -rwxr-xr-x runneradmin/…  19560240  cargo-nextest.exe    (windows)
+  #
+  # `strip_components: 0` is therefore forced in the OTHER direction from the
+  # usual wrapper case: there is no top directory to strip, so 0 keeps the
+  # executable at the content root. `strip_components: 1` on a flat archive
+  # DELETES the only member. PATH is consequently a bare `${installPath}`, which
+  # is why `bin_scan` is `off` in ../mirror-base.yml and metadata.json
+  # hand-lists `binaries`.
+  #
+  # The Windows member already carries its `.exe` suffix INSIDE the archive, so
+  # no per-platform name override is needed (that concern belongs to
+  # `asset_type: binary`, which preserves but never synthesises a suffix).
+  type: archive
+  strip_components: 0
+
+metadata:
+  default: metadata.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  # 0.9.137 is the recon-assigned floor. All three in-range releases (0.9.137,
+  # 0.9.138, 0.9.140) pass the both-ways platform check above, share the same
+  # flat archive layout, and share every CLI surface tests/smoke.star asserts —
+  # `--version`'s multi-line report, the `nextest` argv absorption, and
+  # `nextest self schema {repo-config,user-config}` (38396 / 15801 bytes, same
+  # property set) — all measured on each of the three binaries.
+  min: "0.9.137"
+  new_per_run: 5
+  # Without this the generated workflow only fires on workflow_dispatch + push
+  # and never auto-discovers a new upstream release.
+  poll_interval: "43 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: cargo-nextest/tests/smoke.star
+
+# ─── Platform matrix — RESTATED IN FULL, not merged ─────────────────────────
+#
+# ../mirror-base.yml deliberately carries NO `platforms:` block (the matrix is
+# downstream of the per-package libc measurement above), so there is nothing to
+# merge with and nothing to accidentally drop — but every `containers:` entry is
+# still spelled out here rather than inherited.
+#
+# A platform declared here but absent from `assets:` does NOT cost nothing: the
+# generated test matrix is static, so the leg boots its runner, installs the
+# toolchain, finds the platform missing from every version's resolved set,
+# skips, and reports SUCCESS. That is macOS at 10× and Windows at 2× the minute
+# rate to verify nothing. Pass 1 is Linux only, so Linux only is declared.
+#
+# PASS 2 / PASS 3: uncomment the matching `assets:` keys above AND the platform
+# keys below in the same edit, BY HAND (never by sed — a replacement rewrites
+# `\\.` to `\.` inside an asset regex), then re-run `generate ci` naming EVERY
+# spec in this repository and re-validate.
+#
+# No `setup:` on any container leg: the shipped binaries have zero DT_NEEDED,
+# and the smoke test shells out to nothing — it deliberately avoids every verb
+# that reaches `cargo metadata` / `cargo locate-project` (see tests/smoke.star),
+# so the stock images suffice and a bare key claims exactly what it should.
+platforms:
+  linux/amd64:
+    runner: ubuntu-latest
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  linux/arm64:
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front.
+    runner: ubuntu-24.04-arm
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  # ── PASS 2 (darwin) ────────────────────────────────────────────────────────
+  # darwin/amd64:
+  #   # Intel slice of the universal binary, tested on the arm64 macos-14 runner
+  #   # via Rosetta 2 — GitHub's native macos-13 Intel pool is exhausted and
+  #   # deadlocks the push job. The smoke's `host:` assertion is what proves the
+  #   # x86_64 slice actually ran here rather than the arm64 one.
+  #   runner: macos-14
+  #   prefix: ["arch", "-x86_64"]
+  # darwin/arm64:
+  #   runner: macos-14
+  #   shell: bash
+  # ── PASS 3 (windows) ───────────────────────────────────────────────────────
+  # windows/amd64:
+  #   runner: windows-latest
+  #   shell: pwsh
+  # windows/arm64:
+  #   runner: windows-11-arm
+  #   shell: pwsh
+  #
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+
+annotations:
+  # From the Phase 1.5 license gate. GitHub's single-license API field reports
+  # only one half of the dual grant:
+  #   $ gh api repos/nextest-rs/nextest/license --jq '.license.spdx_id'
+  #   Apache-2.0
+  # The crate itself declares both — `cargo-nextest/Cargo.toml` carries
+  # `license = "Apache-2.0 OR MIT"` — and LICENSE-APACHE + LICENSE-MIT sit at
+  # the repository root AND inside `cargo-nextest/`.
+  org.opencontainers.image.licenses: "Apache-2.0 OR MIT"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: nextest-rs/cargo-nextest
+  fork: ocx-contrib/index

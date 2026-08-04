@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="cargo-nextest">
+  <title>cargo-nextest</title>
+  <!-- Original mark authored for the OCX catalog. Upstream nextest-rs/nextest
+       ships no logo file (its docs site uses the stock mkdocs-material theme
+       assets), so this is not a reproduction of an upstream trademark.
+       Two fast-forward chevrons running into a check: "next" + "tests pass". -->
+  <rect width="512" height="512" rx="104" fill="#22252e"/>
+  <g fill="none" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="118,178 190,256 118,334" stroke="#f0a13c" opacity="0.55"/>
+    <polyline points="212,178 284,256 212,334" stroke="#f0a13c"/>
+    <polyline points="330,272 370,322 442,198" stroke="#4fc98a"/>
+  </g>
+</svg>
