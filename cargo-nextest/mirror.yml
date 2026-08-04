@@ -132,11 +132,11 @@ assets:
     - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-x86_64-unknown-linux-musl\\.tar\\.gz$"
   linux/arm64:
     - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-aarch64-unknown-linux-musl\\.tar\\.gz$"
-  # ── PASS 2 (darwin) — uncomment together with the platforms: keys below ────
-  # darwin/amd64:
-  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
-  # darwin/arm64:
-  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
+  # ── PASS 2 (darwin) — LANDED. ONE asset, TWO platforms (universal binary) ──
+  darwin/amd64:
+    - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
+  darwin/arm64:
+    - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
   # ── PASS 3 (windows) — .tar.gz, not the .zip twin ──────────────────────────
   # windows/amd64:
   #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-x86_64-pc-windows-msvc\\.tar\\.gz$"
@@ -227,17 +227,17 @@ platforms:
       - { image: "ubuntu:24.04", shell: bash }
       - { image: "alpine:3.20",  shell: sh }
       - { image: "fedora:40",    shell: bash }
-  # ── PASS 2 (darwin) ────────────────────────────────────────────────────────
-  # darwin/amd64:
-  #   # Intel slice of the universal binary, tested on the arm64 macos-14 runner
-  #   # via Rosetta 2 — GitHub's native macos-13 Intel pool is exhausted and
-  #   # deadlocks the push job. The smoke's `host:` assertion is what proves the
-  #   # x86_64 slice actually ran here rather than the arm64 one.
-  #   runner: macos-14
-  #   prefix: ["arch", "-x86_64"]
-  # darwin/arm64:
-  #   runner: macos-14
-  #   shell: bash
+  # ── PASS 2 (darwin) — LANDED ───────────────────────────────────────────────
+  darwin/amd64:
+    # Intel slice of the universal binary, tested on the arm64 macos-14 runner
+    # via Rosetta 2 — GitHub's native macos-13 Intel pool is exhausted and
+    # deadlocks the push job. The smoke's `host:` assertion is what proves the
+    # x86_64 slice actually ran here rather than the arm64 one.
+    runner: macos-14
+    prefix: ["arch", "-x86_64"]
+  darwin/arm64:
+    runner: macos-14
+    shell: bash
   # ── PASS 3 (windows) ───────────────────────────────────────────────────────
   # windows/amd64:
   #   runner: windows-latest
