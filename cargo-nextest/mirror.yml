@@ -231,8 +231,24 @@ platforms:
   darwin/amd64:
     # Intel slice of the universal binary, tested on the arm64 macos-14 runner
     # via Rosetta 2 — GitHub's native macos-13 Intel pool is exhausted and
-    # deadlocks the push job. The smoke's `host:` assertion is what proves the
-    # x86_64 slice actually ran here rather than the arm64 one.
+    # deadlocks the push job.
+    #
+    # ⚠️ MEASURED 2026-08-04: `prefix:` IS A NO-OP IN THE ocx-mirror v0.5.2 CI
+    # RENDERER. `package validate` accepts the key, but nothing is emitted for
+    # it — the generated `darwin/amd64` matrix entry is identical to
+    # `darwin/arm64` except for the label, and `grep -c 'arch -x86_64'` over the
+    # rendered workflow is 0 (same for the shipped `mirror-embarkstudios`, which
+    # carries the same key). So on a universal binary the unprefixed run
+    # executes the runner's NATIVE arm64 slice, which run 30872088150's
+    # darwin/amd64 leg reported as `host: aarch64-apple-darwin`.
+    #
+    # The key is kept because it states the intent and costs nothing, but the
+    # slice selection that actually happens is done by tests/smoke.star, which
+    # re-runs the binary through `/usr/bin/arch -x86_64` on macOS. That is what
+    # makes this leg evidence rather than a second arm64 run under an amd64
+    # label. For every OTHER fleet mirror this defect is invisible: those ship a
+    # separate x86_64-only darwin asset, which macOS Rosetta-translates
+    # transparently with no prefix needed.
     runner: macos-14
     prefix: ["arch", "-x86_64"]
   darwin/arm64:

@@ -32,24 +32,27 @@ NEXTEST = "cargo-nextest.exe" if ocx.target_platform.os == ocx.os.Windows else "
 # and `aarch64` on every OS, so one ternary covers the arch half.
 ARCH = "x86_64" if ocx.target_platform.arch == ocx.arch.Amd64 else "aarch64"
 
+# macOS `arch(1)` uses the Darwin spelling, not the Rust one.
+ARCH_FLAG = "-x86_64" if ocx.target_platform.arch == ocx.arch.Amd64 else "-arm64"
 
-def expected_host_target():
+
+def expected_os_suffix():
     # `if` STATEMENTS are legal only inside a `def` in this Bazel dialect.
     o = ocx.target_platform.os
     if o == ocx.os.Darwin:
-        return ARCH + "-apple-darwin"
+        return "-apple-darwin"
     if o == ocx.os.Windows:
-        return ARCH + "-pc-windows-msvc"
+        return "-pc-windows-msvc"
     # Linux: this mirror ships the MUSL asset under a BARE os.features key
     # (proven static: no PT_INTERP, no DT_NEEDED — see mirror.yml). The `-musl`
     # token below is therefore load-bearing, not incidental: if someone
     # re-points the linux asset regex at the `-gnu` build without also adding
     # the `+libc.glibc` key, this line reds instead of the mirror silently
     # publishing a glibc-requiring binary under a universal claim.
-    return ARCH + "-unknown-linux-musl"
+    return "-unknown-linux-musl"
 
 
-HOST = expected_host_target()
+OS_SUFFIX = expected_os_suffix()
 
 # ── Tier 1 + 2: liveness on the composed PATH, version SHAPE ────────────────
 # Measured stdout (0.9.138, linux/amd64):
@@ -72,13 +75,58 @@ expect.matches(r_version.stdout, r"\d+\.\d+\.\d+")
 # runner. Asserting it proves the asset regex shipped the RIGHT binary into the
 # RIGHT bundle — a swap between two platforms' assets would otherwise stay green
 # on both legs.
-#
-# It is strongest on macOS, where BOTH declared platforms resolve to the SAME
-# `universal-apple-darwin` asset: upstream lipo-s two independently compiled
-# slices together, each carrying its own TARGET string, so this line is the only
-# evidence that the darwin/amd64 leg's `arch -x86_64` prefix really selected the
-# x86_64 slice rather than silently testing the arm64 one twice.
-expect.contains(r_version.stdout, "host: " + HOST)
+expect.contains(r_version.stdout, OS_SUFFIX)
+
+
+def check_native_arch():
+    # ⚠️ The arch half is asserted on Linux and Windows only, and the reason is
+    # measured, not assumed. On macOS BOTH declared platforms resolve to the
+    # SAME `universal-apple-darwin` asset — a Mach-O fat binary whose two slices
+    # were compiled separately and therefore carry different TARGET strings. An
+    # UNPREFIXED run executes whichever slice the host prefers, so on GitHub's
+    # arm64 `macos-14` runner the darwin/amd64 leg legitimately reports
+    # `aarch64-apple-darwin`:
+    #
+    #   error: expected cargo-nextest 0.9.137 (75ddba7e9 2026-05-26)
+    #   …
+    #   host: aarch64-apple-darwin
+    #    to contain host: x86_64-apple-darwin
+    #
+    # (run 30872088150, darwin/amd64 leg). That is a property of the runner, not
+    # of the artifact — check_universal_slice() below asserts the arch half on
+    # macOS by selecting the slice explicitly instead.
+    if ocx.target_platform.os == ocx.os.Darwin:
+        return
+    expect.contains(r_version.stdout, "host: " + ARCH + "-")
+
+
+check_native_arch()
+
+
+def check_universal_slice():
+    # macOS only: prove the slice this platform key EXISTS FOR is really in the
+    # fat binary and really runs on this host, by launching it through
+    # `arch(1)`. Without this, declaring darwin/amd64 would rest on a `file`
+    # reading taken at authoring time, and its CI leg would re-test the arm64
+    # slice under an amd64 label — green, having verified nothing new.
+    #
+    # The spec's `platforms.darwin/amd64.prefix: ["arch", "-x86_64"]` cannot do
+    # this job: `package validate` accepts the key, but the ocx-mirror v0.5.2 CI
+    # renderer emits NOTHING for it (the generated darwin/amd64 matrix entry is
+    # identical to darwin/arm64 but for the label), so no prefix ever reaches
+    # the runner. Selecting the slice from inside the test is the only place it
+    # can be done today.
+    #
+    # `/usr/bin/arch` is spelled absolutely so it never depends on how the
+    # bundle composes PATH.
+    if ocx.target_platform.os != ocx.os.Darwin:
+        return
+    r = ocx.run("/usr/bin/arch", ARCH_FLAG, NEXTEST, "--version")
+    expect.ok(r)
+    expect.contains(r.stdout, "host: " + ARCH + "-apple-darwin")
+
+
+check_universal_slice()
 
 # ── The cargo-subcommand argv contract ──────────────────────────────────────
 # cargo-nextest is a CARGO SUBCOMMAND: invoked as `cargo nextest run`, cargo
