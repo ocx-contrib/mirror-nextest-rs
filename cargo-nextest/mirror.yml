@@ -137,11 +137,11 @@ assets:
     - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
   darwin/arm64:
     - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-universal-apple-darwin\\.tar\\.gz$"
-  # ── PASS 3 (windows) — .tar.gz, not the .zip twin ──────────────────────────
-  # windows/amd64:
-  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-x86_64-pc-windows-msvc\\.tar\\.gz$"
-  # windows/arm64:
-  #   - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-aarch64-pc-windows-msvc\\.tar\\.gz$"
+  # ── PASS 3 (windows) — LANDED. .tar.gz, not the .zip twin ──────────────────
+  windows/amd64:
+    - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-x86_64-pc-windows-msvc\\.tar\\.gz$"
+  windows/arm64:
+    - "^cargo-nextest-\\d+\\.\\d+\\.\\d+-aarch64-pc-windows-msvc\\.tar\\.gz$"
 
 asset_type:
   # FLAT archive on EVERY platform — `tar tzvf` lists exactly ONE member and
@@ -254,13 +254,16 @@ platforms:
   darwin/arm64:
     runner: macos-14
     shell: bash
-  # ── PASS 3 (windows) ───────────────────────────────────────────────────────
-  # windows/amd64:
-  #   runner: windows-latest
-  #   shell: pwsh
-  # windows/arm64:
-  #   runner: windows-11-arm
-  #   shell: pwsh
+  # ── PASS 3 (windows) — LANDED ──────────────────────────────────────────────
+  windows/amd64:
+    runner: windows-latest
+    shell: pwsh
+  windows/arm64:
+    # windows/arm64 needs an arm64 runner: the `.exe` inside the asset is
+    # PE32+ ARM64 (`file` on 0.9.137 and 0.9.140), and unlike macOS there is no
+    # fat-binary/translation story to fall back on here.
+    runner: windows-11-arm
+    shell: pwsh
   #
   # No `containers:` on darwin or windows — those runners have no Linux
   # container engine, and the key is rejected at spec load.
