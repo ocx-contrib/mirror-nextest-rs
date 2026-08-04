@@ -6,7 +6,7 @@ name: cargo-nextest
 
 on:
   schedule:
-    - cron: '43 */6 * * *'
+    - cron: '13 3-23/6 * * *'
   workflow_dispatch:
   push:
     branches: [main]
