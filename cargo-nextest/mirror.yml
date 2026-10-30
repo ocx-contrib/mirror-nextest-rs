@@ -229,7 +229,7 @@ platforms:
       - { image: "fedora:40",    shell: bash }
   # ── PASS 2 (darwin) — LANDED ───────────────────────────────────────────────
   darwin/amd64:
-    # Intel slice of the universal binary, tested on the arm64 macos-14 runner
+    # Intel slice of the universal binary, tested on the arm64 macos-15 runner
     # via Rosetta 2 — GitHub's native macos-13 Intel pool is exhausted and
     # deadlocks the push job.
     #
@@ -249,10 +249,10 @@ platforms:
     # label. For every OTHER fleet mirror this defect is invisible: those ship a
     # separate x86_64-only darwin asset, which macOS Rosetta-translates
     # transparently with no prefix needed.
-    runner: macos-14
+    runner: macos-15
     prefix: ["arch", "-x86_64"]
   darwin/arm64:
-    runner: macos-14
+    runner: macos-15
     shell: bash
   # ── PASS 3 (windows) — LANDED ──────────────────────────────────────────────
   windows/amd64:
